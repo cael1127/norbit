@@ -1,0 +1,224 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id        String   @id @default(uuid())
+  name      String
+  plan      String   @default("free") // free, pro, enterprise
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  leads     Lead[]
+  workflows Workflow[]
+  calendars CalendarIntegration[]
+
+  @@map("accounts")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  firstName String?
+  lastName  String?
+  role      String   @default("user") // user, admin
+  accountId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account       Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Lead {
+  id          String   @id @default(uuid())
+  accountId   String
+  email       String?
+  phone       String?
+  firstName   String?
+  lastName    String?
+  company     String?
+  title       String?
+  website     String?
+  status      String   @default("new") // new, contacted, qualified, scheduled, converted, lost
+  score       Int      @default(0)
+  source      String?  // where the lead was discovered
+  tags        String[] @default([])
+  notes       String?
+  metadata    Json?    // Additional flexible data
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account         Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  activities      LeadActivity[]
+  conversations   Conversation[]
+  calendarEvents  CalendarEvent[]
+  workflowRuns     WorkflowRun[]
+
+  @@index([accountId, status])
+  @@index([email])
+  @@map("leads")
+}
+
+model LeadActivity {
+  id        String   @id @default(uuid())
+  leadId    String
+  type      String   // outreach, call, email, meeting, note, status_change
+  title     String
+  description String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@map("lead_activities")
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  accountId String
+  leadId    String?
+  title     String?
+  status    String   @default("active") // active, archived
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  lead    Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  messages Message[]
+
+  @@index([accountId, status])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  role           String   // user, assistant, system
+  content        String
+  metadata       Json?    // tool calls, function results, etc.
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model CalendarIntegration {
+  id            String   @id @default(uuid())
+  accountId     String
+  provider      String   // google, outlook
+  accessToken   String
+  refreshToken  String?
+  expiresAt     DateTime?
+  calendarId    String?  // Primary calendar ID
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  calendarEvents CalendarEvent[]
+
+  @@unique([accountId, provider])
+  @@map("calendar_integrations")
+}
+
+model CalendarEvent {
+  id                    String   @id @default(uuid())
+  integrationId         String
+  leadId                String?
+  googleEventId         String?  @unique
+  title                 String
+  description           String?
+  startTime             DateTime
+  endTime               DateTime
+  location              String?
+  meetingLink           String?
+  status                String   @default("scheduled") // scheduled, confirmed, cancelled, completed
+  reminderSent          Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  integration CalendarIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  lead        Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([integrationId, startTime])
+  @@index([leadId])
+  @@map("calendar_events")
+}
+
+model Workflow {
+  id          String   @id @default(uuid())
+  accountId   String
+  name        String
+  description String?
+  definition  Json     // Workflow definition (triggers, actions, conditions)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  runs        WorkflowRun[]
+
+  @@index([accountId, isActive])
+  @@map("workflows")
+}
+
+model WorkflowRun {
+  id          String   @id @default(uuid())
+  workflowId  String
+  leadId      String?
+  status      String   @default("pending") // pending, running, completed, failed
+  input       Json?
+  output      Json?
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  lead     Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([workflowId, status])
+  @@index([leadId])
+  @@map("workflow_runs")
+}
+
+model Report {
+  id          String   @id @default(uuid())
+  accountId   String
+  type        String   // dashboard, leads, outreach, calendar, workflows
+  period      String   // daily, weekly, monthly
+  data        Json     // Aggregated report data
+  generatedAt DateTime @default(now())
+
+  @@index([accountId, type, generatedAt])
+  @@map("reports")
+}
